@@ -1,10 +1,12 @@
 package payload
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/MacroPower/macropower-analytics-panel/server/cacher"
 	"github.com/go-kit/kit/log"
@@ -13,34 +15,97 @@ import (
 
 // Handler is the handler for incoming payloads.
 type Handler struct {
-	logger log.Logger
-	ch     chan Payload
+	logger         log.Logger
+	ch             chan Payload
+	grafanaAuthURL string
+	httpClient     *http.Client
 }
 
 // NewHandler creates a new Handler.
-func NewHandler(cache *cacher.Cacher, buffer int, sessionLog bool, variableLog bool, raw bool, logger log.Logger) *Handler {
+func NewHandler(cache *cacher.Cacher, buffer int, sessionLog bool, variableLog bool, raw bool, grafanaAuthURL string, logger log.Logger) *Handler {
 	ch := make(chan Payload, buffer)
 	go startProcessor(cache, ch, sessionLog, variableLog, raw, logger)
 
+	// Create HTTP client with timeout for authentication requests
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
 	return &Handler{
-		logger: logger,
-		ch:     ch,
+		logger:         logger,
+		ch:             ch,
+		grafanaAuthURL: grafanaAuthURL,
+		httpClient:     httpClient,
 	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := Payload{}
 
-	err := json.NewDecoder(r.Body).Decode(&p)
+	// Extract the cookie from the request
+	cookie, err := r.Cookie("grafana_session")
 	if err != nil {
-		http.Error(w, "", http.StatusBadRequest)
+		level.Debug(h.logger).Log("msg", "Missing grafana_session cookie", "error", err)
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
 		return
 	}
 
+	// Authenticate with Grafana if auth URL is configured
+	if h.grafanaAuthURL != "" {
+		if !h.authenticateWithGrafana(cookie) {
+			level.Debug(h.logger).Log("msg", "Grafana authentication failed", "cookie_name", cookie.Name)
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+		level.Debug(h.logger).Log("msg", "Grafana authentication successful")
+	}
+
+	// Parse the JSON payload
+	err = json.NewDecoder(r.Body).Decode(&p)
+	if err != nil {
+		level.Error(h.logger).Log("msg", "Failed to decode JSON payload", "error", err)
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	// Send payload to processor
 	h.ch <- p
 
 	w.WriteHeader(http.StatusCreated)
 	fmt.Fprint(w, "")
+}
+
+// authenticateWithGrafana validates the session cookie with Grafana
+func (h *Handler) authenticateWithGrafana(cookie *http.Cookie) bool {
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create request to Grafana auth endpoint
+	req, err := http.NewRequestWithContext(ctx, "GET", h.grafanaAuthURL, nil)
+	if err != nil {
+		level.Error(h.logger).Log("msg", "Failed to create auth request", "error", err)
+		return false
+	}
+
+	// Add the session cookie
+	req.AddCookie(cookie)
+
+	// Make the request
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		level.Error(h.logger).Log("msg", "Failed to authenticate with Grafana", "error", err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Check if authentication was successful
+	if resp.StatusCode != http.StatusOK {
+		level.Debug(h.logger).Log("msg", "Grafana authentication failed", "status_code", resp.StatusCode)
+		return false
+	}
+
+	return true
 }
 
 // startProcessor starts a receiver and optional logger for the Payload channel.

@@ -33,3 +33,6 @@ server/vendor/
 **/.test/
 **/.release/
 **/.tarballs/
+
+*.zip
+*.zip.md5

@@ -26,6 +26,7 @@ var (
 		DisableUserMetrics bool          `help:"Disables user labels in metrics." env:"DISABLE_USER_METRICS"`
 		DisableSessionLog  bool          `help:"Disables logging sessions to the console." env:"DISABLE_SESSION_LOG"`
 		DisableVariableLog bool          `help:"Disables logging variables to the console." env:"DISABLE_VARIABLE_LOG"`
+		GrafanaAuthURL     string        `help:"The URL of the Grafana API server for authentication (e.g., http://grafana:3000/api/auth/keys). If empty, authentication is disabled." env:"GRAFANA_AUTH_URL"`
 	}
 )
 
@@ -65,7 +66,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	handler := payload.NewHandler(cache, 10, !cli.DisableSessionLog, !cli.DisableVariableLog, cli.LogRaw, logger)
+	handler := payload.NewHandler(cache, 10, !cli.DisableSessionLog, !cli.DisableVariableLog, cli.LogRaw, cli.GrafanaAuthURL, logger)
 	mux.Handle("/write", handler)
 
 	exporter := version.NewCollector("grafana_analytics")

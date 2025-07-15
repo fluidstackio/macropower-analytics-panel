@@ -80,6 +80,7 @@ export class AnalyticsPanel extends PureComponent<Props> {
           'Content-Type': 'application/json',
         },
         keepalive: true,
+        credentials: 'include',
       })
         .then((r) => throwOnBadResponse(r))
         .catch((e: Error) => {
