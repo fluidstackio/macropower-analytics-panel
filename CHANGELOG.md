@@ -7,8 +7,8 @@ Add include cookie credentials for the js plugin
 Add a build script to build the plugin for Helm
 
 Add a .gitignore file to ignore the build script and the build output
-
-Move docker build to dockerfile
+ 
+Move docker build to dockerfile @mjibril
   
 ## 2.1.0 (2021-08-09)
 
